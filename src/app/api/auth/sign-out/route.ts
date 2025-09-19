@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { supabase } from '@/services'
+import { supabase } from '@/utils/supabase/client'
 
 export async function POST() {
   const { error } = await supabase.auth.signOut()
