@@ -39,8 +39,7 @@ export async function middleware(request: NextRequest) {
   const isIncomplete =
     !profile ||
     !profile.full_name?.trim() ||
-    !profile.grade_level || // assuming grade_level is required
-    !profile.bio?.trim()
+    !profile.grade_level
 
   // ─── 4️⃣ IF INCOMPLETE → /onboarding ────────────────────
   if (isIncomplete && path !== '/onboarding') {
