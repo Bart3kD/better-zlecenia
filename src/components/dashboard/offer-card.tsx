@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from 'react';
 import {
   Card,
   CardContent,
@@ -11,6 +12,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Clock,
+  DollarSign, 
+  User, 
   Calendar,
   Star,
   MessageCircle,
@@ -20,6 +23,8 @@ import {
 import { renderIcon } from "@/utils/icon-mapping";
 import { Offer } from "@/services/offers-service";
 import { formatDistanceToNow } from "date-fns";
+import StartConversation from '@/components/conversations/start-conversation';
+import { supabase } from '@/utils/supabase/client';
 
 interface OfferCardProps {
   offer: Offer;
@@ -34,8 +39,19 @@ export default function OfferCard({
   onContact,
   onSave,
 }: OfferCardProps) {
-  const isPoster = false; // TODO: Get from auth context
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const isHelpWanted = offer.type === "help_wanted";
+  
+  // Get current user
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setCurrentUserId(user?.id || null);
+    };
+    getCurrentUser();
+  }, []);
+
+  const isPoster = currentUserId === offer.poster_id;
 
   const getOfferTypeStyle = () => {
     if (isHelpWanted) {
@@ -70,11 +86,11 @@ export default function OfferCard({
 
   return (
     <Card
-      className={`transition-all duration-200 hover:shadow-lg gap-2 h-100 ${styles.card}`}
+      className={`transition-all duration-200 hover:shadow-lg ${styles.card}`}
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+          <div className="flex-1 min-w-0">
             <h3 className="text-lg font-semibold truncate mb-1">
               {offer.title.length > 33
                 ? offer.title.slice(0, 30) + "..."
@@ -135,34 +151,33 @@ export default function OfferCard({
           </div>
         )}
 
+        {/* Tags */}
+        {offer.tags && offer.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-3">
+            {offer.tags.slice(0, 3).map((tag) => (
+              <Badge 
+                key={tag} 
+                variant="secondary" 
+                className="text-xs px-2 py-0.5"
+              >
+                {tag}
+              </Badge>
+            ))}
+            {offer.tags.length > 3 && (
+              <Badge variant="outline" className="text-xs px-2 py-0.5">
+                +{offer.tags.length - 3}
+              </Badge>
+            )}
+          </div>
+        )}
+
         {/* Meta Information */}
-        <div className="space-y-1 text-xs text-gray-500 mt-auto">
-          {/* Tags */}
-          {offer.tags && offer.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {offer.tags.slice(0, 4).map((tag) => (
-                <Badge
-                  key={tag}
-                  variant="secondary"
-                  className="text-xs px-2 py-0.5"
-                >
-                  {tag}
-                </Badge>
-              ))}
-              {offer.tags.length > 3 && (
-                <Badge variant="outline" className="text-xs px-2 py-0.5">
-                  +{offer.tags.length - 4}
-                </Badge>
-              )}
-            </div>
-          )}
+        <div className="space-y-1 text-xs text-gray-500">
           <div className="flex items-center gap-1">
             <Clock className="h-3 w-3" />
-            <span>
-              Posted {formatDistanceToNow(new Date(offer.created_at))} ago
-            </span>
+            <span>Posted {formatDistanceToNow(new Date(offer.created_at))} ago</span>
           </div>
-
+          
           {offer.deadline && (
             <div className="flex items-center gap-1">
               <Calendar className="h-3 w-3" />
@@ -172,20 +187,17 @@ export default function OfferCard({
 
           <div className="flex items-center gap-1">
             <MapPin className="h-3 w-3" />
-            <span>Status:</span>
-            <Badge
-              variant="outline"
+            <span>Status: </span>
+            <Badge 
+              variant="outline" 
               className={`text-xs px-1 py-0 ${
-                offer.status === "open"
-                  ? "text-green-600 border-green-200"
-                  : offer.status === "in_progress"
-                  ? "text-blue-600 border-blue-200"
-                  : offer.status === "completed"
-                  ? "text-gray-600 border-gray-200"
-                  : "text-red-600 border-red-200"
+                offer.status === 'open' ? 'text-green-600 border-green-200' :
+                offer.status === 'in_progress' ? 'text-blue-600 border-blue-200' :
+                offer.status === 'completed' ? 'text-gray-600 border-gray-200' :
+                'text-red-600 border-red-200'
               }`}
             >
-              {offer.status.replace("_", " ")}
+              {offer.status.replace('_', ' ')}
             </Badge>
           </div>
         </div>
@@ -200,17 +212,15 @@ export default function OfferCard({
         >
           View Details
         </Button>
-
-        {!isPoster && offer.status === "open" && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onContact?.(offer.id)}
-            className="flex items-center gap-1"
-          >
-            <MessageCircle className="h-3 w-3" />
-            Contact
-          </Button>
+        
+        {!isPoster && offer.status === 'open' && (
+          <StartConversation
+            offerId={offer.id}
+            posterName={offer.poster?.full_name || offer.poster?.username}
+            offerTitle={offer.title}
+            buttonText="Contact"
+            buttonVariant="outline"
+          />
         )}
 
         <Button

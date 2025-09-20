@@ -115,7 +115,7 @@ export const updateOfferSchema = z.object({
         .optional(),
     
     deadline: z
-        .string()
+        .iso
         .datetime('Invalid deadline format')
         .optional()
         .nullable(),
@@ -140,6 +140,9 @@ export const updateOfferSchema = z.object({
 });
 
 export const updateOfferStatusSchema = z.object({
+    offer_id: z
+        .uuid('Invalid offer ID'),
+        
     status: z
         .enum(OFFER_STATUS, "Invalid status"),
     

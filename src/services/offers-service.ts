@@ -1,5 +1,5 @@
 import { supabase } from '@/utils/supabase/client';
-import { CreateOfferData } from '@/schemas/offers.schemas';
+import { CreateOfferData, UpdateOfferData, UpdateOfferStatusData } from '@/schemas/offers.schemas';
 
 export interface Offer {
   id: string;
@@ -164,7 +164,7 @@ export const offersService = {
     return data;
   },
 
-  async updateOffer(id: string, updates: Partial<CreateOfferData>): Promise<Offer> {
+  async updateOffer(id: string, updates: Partial<UpdateOfferData>): Promise<Offer> {
     const { data, error } = await supabase
       .from('offers')
       .update({
@@ -202,6 +202,58 @@ export const offersService = {
     }
     
     return data;
+  },
+
+  async updateOfferStatus(data: UpdateOfferStatusData): Promise<Offer> {
+  const updateData: any = {
+    status: data.status,
+    updated_at: new Date().toISOString()
+  };
+
+  // Only set taker_id if provided
+  if (data.taker_id !== undefined) {
+    updateData.taker_id = data.taker_id;
+  }
+
+  // Set completed_at if marking as completed
+  if (data.status === 'completed') {
+    updateData.completed_at = new Date().toISOString();
+  }
+
+  const { data: updatedOffer, error } = await supabase
+    .from('offers')
+    .update(updateData)
+    .eq('id', data.offer_id)
+    .select(`
+      *,
+      poster:profiles!poster_id (
+        id,
+        username,
+        full_name,
+        avatar_url,
+        average_rating
+      ),
+      taker:profiles!taker_id (
+        id,
+        username,
+        full_name,
+        avatar_url,
+        average_rating
+      ),
+      category:categories (
+        id,
+        name,
+        icon
+      )
+    `)
+    .single();
+
+  if (error) {
+    console.error('Error updating offer status:', error);
+    throw error;
+  }
+
+  return updatedOffer;
   },
 
   async deleteOffer(id: string): Promise<void> {

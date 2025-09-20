@@ -25,4 +25,4 @@ export interface Message {
     attachments: MessageAttachment[] | null;
     created_at: string;
     updated_at: string;
-}
+}   
