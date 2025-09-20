@@ -27,6 +27,27 @@ export const attachmentSchema = z.object({
         .string()
 });
 
+const offerSchema = z.object({
+  id: z.uuid(),
+  poster_id: z.uuid(),
+  taker_id: z.uuid().nullable(),
+  category_id: z.uuid(),
+  type: z.enum(['help_wanted', 'offering_help']),
+  title: z.string(),
+  description: z.string(),
+  price: z.number(),
+  deadline: z.string().nullable(),
+  status: z.enum(['open', 'in_progress', 'completed', 'cancelled']),
+  requirements: z.string().nullable(),
+  attachments: z
+        .array(attachmentSchema)
+        .nullable(),
+  tags: z.array(z.string()).nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  completed_at: z.string().nullable(),
+});
+
 export const createOfferSchema = z.object({
     category_id: z
         .uuid('Invalid category ID'),
@@ -46,7 +67,7 @@ export const createOfferSchema = z.object({
     
     price: z
         .number()
-        .positive('Price must be greater than 0')
+        .min(0, 'Price must be greater or equal to 0')
         .max(99999.99, 'Price cannot exceed 99,999.99'),
     
     deadline: z
@@ -234,6 +255,7 @@ export const searchOffersSchema = z.object({
 );
 
 export type Attachment = z.infer<typeof attachmentSchema>;
+export type Offer = z.infer<typeof offerSchema>;
 export type CreateOfferData = z.infer<typeof createOfferSchema>;
 export type UpdateOfferData = z.infer<typeof updateOfferSchema>;
 export type UpdateOfferStatusData = z.infer<typeof updateOfferStatusSchema>;
