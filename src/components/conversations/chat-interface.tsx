@@ -32,6 +32,10 @@ import { MESSAGE_TYPE, OFFER_RESPONSE_TYPE } from '@/types/messages.types';
 import { supabase } from '@/utils/supabase/client';
 import { formatDistanceToNow, format } from 'date-fns';
 import { OFFER_STATUS } from '@/types/offers.types';
+import { CANCELLATION_REQUEST_TYPE } from '@/types/messages.types';
+import { AlertTriangle } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 
 interface ChatInterfaceProps {
   conversation: ConversationWithDetails;
@@ -50,6 +54,8 @@ export default function ChatInterface({ conversation, onBack }: ChatInterfacePro
   const [hasScrolledToUnread, setHasScrolledToUnread] = useState(false);
   const [firstUnreadMessageId, setFirstUnreadMessageId] = useState<string | null>(null);
   const [showUnreadDivider, setShowUnreadDivider] = useState(false);
+  const [respondingToMessage, setRespondingToMessage] = useState<string | null>(null);
+  const [responseMessage, setResponseMessage] = useState('');
 
   const form = useForm<ChatMessageFormData>({
     defaultValues: {
@@ -187,6 +193,43 @@ export default function ChatInterface({ conversation, onBack }: ChatInterfacePro
       });
     }
   });
+
+const respondToCancellationMutation = useMutation({
+  mutationFn: async (data: { 
+    messageId: string;
+    approved: boolean; 
+    message?: string;
+    offerId: string;
+  }) => {
+    if (!currentUserId) throw new Error('User not authenticated');
+
+    const result = await messagesService.respondToOfferCancellation(
+      conversation.id,
+      data.offerId,
+      data.approved,
+      data.message
+    );
+
+    return { ...result, approved: data.approved };
+  },
+  onSuccess: (result) => {
+    queryClient.invalidateQueries({ queryKey: ['messages', conversation.id] });
+    queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    queryClient.invalidateQueries({ queryKey: ['conversation', conversation.id] });
+    queryClient.invalidateQueries({ queryKey: ['offers'] });
+    
+    // If cancellation was approved, update the local conversation state immediately
+    if (result.approved) {
+      queryClient.setQueryData(['conversation', conversation.id], (old: ConversationWithDetails | undefined) => {
+        if (!old) return old;
+        return { ...old, is_active: false };
+      });
+    }
+    
+    setRespondingToMessage(null);
+    setResponseMessage('');
+  }
+});
 
   // Send offer response mutation
   const sendOfferResponseMutation = useMutation({
@@ -335,92 +378,308 @@ if (responseData.type === 'accept') {
     </div>
   );
 
-  const renderMessage = (message: MessageWithSender, index: number) => {
-    const isOwn = message.sender_id === currentUserId;
-    const otherParticipant = getOtherParticipant();
-    const firstUnreadIndex = getFirstUnreadIndex();
-    const isFirstUnread = index === firstUnreadIndex;
-
+  const renderConversationStatus = () => {
+  const currentConversation = freshConversation || conversation;
+  
+  if (currentConversation.offer?.status === 'cancelled') {
     return (
-      <div key={message.id}>
-        {/* Render unread divider before the first unread message */}
-        {isFirstUnread && renderUnreadDivider()}
-        
-        <div className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
-          {!isOwn && (
-            <Avatar className="h-8 w-8 flex-shrink-0">
-              <AvatarImage src={message.sender?.avatar_url} />
-              <AvatarFallback className="text-xs">
-                {getInitials(message.sender?.full_name || message.sender?.username)}
-              </AvatarFallback>
-            </Avatar>
-          )}
+      <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 px-3 py-2 rounded-md">
+        <XCircle className="h-4 w-4" />
+        <span>Offer has been cancelled</span>
+      </div>
+    );
+  }
+  
+  if (!currentConversation.is_active) {
+    // Check if it was deactivated due to approved cancellation
+    return (
+      <div className="flex items-center gap-2 text-sm text-orange-600 bg-orange-50 px-3 py-2 rounded-md">
+        <AlertCircle className="h-4 w-4" />
+        <span>Conversation ended - Cancellation approved</span>
+      </div>
+    );
+  }
+  
+  if (currentConversation.offer?.status === 'in_progress') {
+    return (
+      <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-2 rounded-md">
+        <CheckCircle className="h-4 w-4" />
+        <span>Offer accepted and in progress</span>
+      </div>
+    );
+  }
+  
+  return null;
+};
 
-          <div className={`flex flex-col max-w-[70%] ${isOwn ? 'items-end' : 'items-start'}`}>
-            {/* Message bubble */}
-            <div 
-              className={`rounded-lg px-4 py-2 transition-all duration-200 ${
-                isOwn 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-100 text-gray-900'
-              }`}
-            >
-              {message.message_type === MESSAGE_TYPE.OFFER_RESPONSE && (
-                <div className="mb-2">
-                  {message.offer_response_type === OFFER_RESPONSE_TYPE.ACCEPT && (
-                    <div className="flex items-center gap-1 text-green-300">
-                      <CheckCircle className="h-4 w-4" />
-                      <span className="text-sm font-medium">Accepted offer</span>
+const renderMessage = (message: MessageWithSender, index: number) => {
+  const isOwn = message.sender_id === currentUserId;
+  const otherParticipant = getOtherParticipant();
+  const firstUnreadIndex = getFirstUnreadIndex();
+  const isFirstUnread = index === firstUnreadIndex;
+  
+  // Check if current user can respond to this cancellation request
+  const canRespondToCancellation = () => {
+    return message.message_type === MESSAGE_TYPE.CANCELLATION_REQUEST &&
+           message.cancellation_request_type === CANCELLATION_REQUEST_TYPE.REQUEST &&
+           !isOwn && // Not sent by current user
+           currentUserId === conversation.poster_id && // Current user is the poster
+           conversation.offer?.status === 'in_progress'; // Offer is in progress
+  };
+
+  const handleCancellationResponse = (approved: boolean) => {
+    if (!conversation.offer?.id) return;
+    
+    respondToCancellationMutation.mutate({
+      messageId: message.id,
+      approved,
+      message: responseMessage.trim() || undefined,
+      offerId: conversation.offer.id
+    });
+  };
+
+  return (
+    <div key={message.id}>
+      {/* Render unread divider before the first unread message */}
+      {isFirstUnread && renderUnreadDivider()}
+      
+      <div className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
+        {!isOwn && (
+          <Avatar className="h-8 w-8 flex-shrink-0">
+            <AvatarImage src={message.sender?.avatar_url} />
+            <AvatarFallback className="text-xs">
+              {getInitials(message.sender?.full_name || message.sender?.username)}
+            </AvatarFallback>
+          </Avatar>
+        )}
+
+        <div className={`flex flex-col max-w-[70%] ${isOwn ? 'items-end' : 'items-start'}`}>
+          {/* Message bubble */}
+          <div 
+            className={`rounded-lg px-4 py-2 transition-all duration-200 ${
+              message.message_type === MESSAGE_TYPE.CANCELLATION_REQUEST
+                ? 'bg-orange-50 border border-orange-200 text-orange-900'
+                : isOwn 
+                ? 'bg-blue-600 text-white' 
+                : 'bg-gray-100 text-gray-900'
+            }`}
+          >
+            {/* Render Cancellation Request Messages */}
+            {message.message_type === MESSAGE_TYPE.CANCELLATION_REQUEST && (
+              <div className="space-y-3">
+                {message.cancellation_request_type === CANCELLATION_REQUEST_TYPE.REQUEST && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-orange-500" />
+                      <span className="font-medium text-orange-800">Cancellation Request</span>
                     </div>
-                  )}
-                  {message.offer_response_type === OFFER_RESPONSE_TYPE.DECLINE && (
-                    <div className="flex items-center gap-1 text-red-300">
-                      <XCircle className="h-4 w-4" />
-                      <span className="text-sm font-medium">Declined offer</span>
-                    </div>
-                  )}
-                  {message.offer_response_type === OFFER_RESPONSE_TYPE.COUNTER_OFFER && (
-                    <div className="mb-2">
-                      <div className="flex items-center gap-1 text-yellow-300 mb-1">
-                        <AlertCircle className="h-4 w-4" />
-                        <span className="text-sm font-medium">Counter offer</span>
-                      </div>
+                    {message.cancellation_reason && (
                       <div className="text-sm">
-                        <strong>${message.counter_offer_price}</strong>
-                        {message.counter_offer_details && (
-                          <p className="mt-1">{message.counter_offer_details}</p>
-                        )}
+                        <strong className="text-orange-800">Reason:</strong>
+                        <p className="mt-1 text-orange-700">{message.cancellation_reason}</p>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
-              
-              {message.content && (
-                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-              )}
-            </div>
+                    )}
+                    {message.content && (
+                      <div className="text-sm">
+                        <strong className="text-orange-800">Additional message:</strong>
+                        <p className="mt-1 text-orange-700">{message.content}</p>
+                      </div>
+                    )}
+                    
+                    {/* Action Buttons for Poster */}
+                    {canRespondToCancellation() && (
+                      <div className="flex gap-2 pt-2 border-t border-orange-200">
+                        {/* Approve Button with Dialog */}
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              size="sm"
+                              className="bg-green-600 hover:bg-green-700 text-white"
+                            >
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Approve
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent>
+                            <DialogHeader>
+                              <DialogTitle>Approve Cancellation Request</DialogTitle>
+                              <DialogDescription>
+                                This will approve the cancellation request and return the offer to "open" status.
+                              </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-4">
+                              <div>
+                                <Label htmlFor="approval-message">Response Message (Optional)</Label>
+                                <Textarea
+                                  id="approval-message"
+                                  placeholder="Add a response message..."
+                                  value={responseMessage}
+                                  onChange={(e) => setResponseMessage(e.target.value)}
+                                />
+                              </div>
+                              <div className="flex gap-2 justify-end">
+                                <Button
+                                  variant="outline"
+                                  onClick={() => setResponseMessage('')}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  onClick={() => handleCancellationResponse(true)}
+                                  disabled={respondToCancellationMutation.isPending}
+                                  className="bg-green-600 hover:bg-green-700"
+                                >
+                                  {respondToCancellationMutation.isPending ? 'Processing...' : 'Approve Cancellation'}
+                                </Button>
+                              </div>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
 
-            {/* Timestamp and status */}
-            <div className={`flex items-center gap-2 mt-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
-              <span className="text-xs text-gray-500">
-                {formatMessageTime(message.created_at)}
+                        {/* Deny Button with Dialog */}
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-red-200 text-red-600 hover:bg-red-50"
+                            >
+                              <XCircle className="h-3 w-3 mr-1" />
+                              Deny
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent>
+                            <DialogHeader>
+                              <DialogTitle>Deny Cancellation Request</DialogTitle>
+                              <DialogDescription>
+                                This will deny the cancellation request and the offer will continue as agreed.
+                              </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-4">
+                              <div>
+                                <Label htmlFor="denial-message">Response Message (Optional)</Label>
+                                <Textarea
+                                  id="denial-message"
+                                  placeholder="Explain why you're denying the request..."
+                                  value={responseMessage}
+                                  onChange={(e) => setResponseMessage(e.target.value)}
+                                />
+                              </div>
+                              <div className="flex gap-2 justify-end">
+                                <Button
+                                  variant="outline"
+                                  onClick={() => setResponseMessage('')}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  onClick={() => handleCancellationResponse(false)}
+                                  disabled={respondToCancellationMutation.isPending}
+                                  variant="destructive"
+                                >
+                                  {respondToCancellationMutation.isPending ? 'Processing...' : 'Deny Request'}
+                                </Button>
+                              </div>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                      </div>
+                    )}
+                  </>
+                )}
+                
+                {message.cancellation_request_type === CANCELLATION_REQUEST_TYPE.APPROVE && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="font-medium text-green-800">Cancellation Approved</span>
+                    </div>
+                    <p className="text-sm text-green-700">The cancellation request has been approved. The offer is now available again.</p>
+                    {message.content && (
+                      <div className="text-sm">
+                        <strong className="text-green-800">Response:</strong>
+                        <p className="mt-1 text-green-700">{message.content}</p>
+                      </div>
+                    )}
+                  </>
+                )}
+                
+                {message.cancellation_request_type === CANCELLATION_REQUEST_TYPE.DENY && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <XCircle className="h-4 w-4 text-red-500" />
+                      <span className="font-medium text-red-800">Cancellation Denied</span>
+                    </div>
+                    <p className="text-sm text-red-700">The cancellation request has been denied. The offer continues as agreed.</p>
+                    {message.content && (
+                      <div className="text-sm">
+                        <strong className="text-red-800">Response:</strong>
+                        <p className="mt-1 text-red-700">{message.content}</p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Render Offer Response Messages */}
+            {message.message_type === MESSAGE_TYPE.OFFER_RESPONSE && (
+              <div className="mb-2">
+                {message.offer_response_type === OFFER_RESPONSE_TYPE.ACCEPT && (
+                  <div className="flex items-center gap-1 text-green-300">
+                    <CheckCircle className="h-4 w-4" />
+                    <span className="text-sm font-medium">Accepted offer</span>
+                  </div>
+                )}
+                {message.offer_response_type === OFFER_RESPONSE_TYPE.DECLINE && (
+                  <div className="flex items-center gap-1 text-red-300">
+                    <XCircle className="h-4 w-4" />
+                    <span className="text-sm font-medium">Declined offer</span>
+                  </div>
+                )}
+                {message.offer_response_type === OFFER_RESPONSE_TYPE.COUNTER_OFFER && (
+                  <div className="mb-2">
+                    <div className="flex items-center gap-1 text-yellow-300 mb-1">
+                      <AlertCircle className="h-4 w-4" />
+                      <span className="text-sm font-medium">Counter offer</span>
+                    </div>
+                    <div className="text-sm">
+                      <strong>${message.counter_offer_price}</strong>
+                      {message.counter_offer_details && (
+                        <p className="mt-1">{message.counter_offer_details}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Render regular text content for non-cancellation messages */}
+            {message.message_type !== MESSAGE_TYPE.CANCELLATION_REQUEST && message.content && (
+              <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+            )}
+          </div>
+
+          {/* Timestamp and status */}
+          <div className={`flex items-center gap-2 mt-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
+            <span className="text-xs text-gray-500">
+              {formatMessageTime(message.created_at)}
+            </span>
+            {isOwn && (
+              <span className="text-xs">
+                {message.is_read ? (
+                  <span className="text-blue-500">✓✓</span>
+                ) : (
+                  <span className="text-gray-400">✓</span>
+                )}
               </span>
-              {isOwn && (
-                <span className="text-xs">
-                  {message.is_read ? (
-                    <span className="text-blue-500">✓✓</span>
-                  ) : (
-                    <span className="text-gray-400">✓</span>
-                  )}
-                </span>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>
-    );
-  };
+    </div>
+  );
+};
 
   const otherParticipant = getOtherParticipant();
 
@@ -465,6 +724,7 @@ if (responseData.type === 'accept') {
           <Button variant="ghost" size="sm">
             <MoreVertical className="h-4 w-4" />
           </Button>
+          {renderConversationStatus()}
         </div>
 
         {/* Offer Details */}
@@ -562,13 +822,26 @@ if (responseData.type === 'accept') {
 
       {/* Message Input */}
       <div className="border-t bg-white p-4">
-        {!isConversationActive() ? (
-          <div className="text-center text-gray-500 py-4">
-            <MessageCircle className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-            <p className="text-sm">This conversation is no longer active</p>
-            <p className="text-xs text-gray-400 mt-1">You cannot send messages in this conversation</p>
-          </div>
-        ) : (
+{!isConversationActive() ? (
+  <div className="text-center text-gray-500 py-4">
+    <MessageCircle className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+    {conversation.is_active === false ? (
+      <>
+        <p className="text-sm">This conversation has ended</p>
+        <p className="text-xs text-gray-400 mt-1">
+          {conversation.offer?.status === 'cancelled' 
+            ? 'The offer was cancelled' 
+            : 'The agreement was terminated'}
+        </p>
+      </>
+    ) : (
+      <>
+        <p className="text-sm">This conversation is no longer active</p>
+        <p className="text-xs text-gray-400 mt-1">You cannot send messages in this conversation</p>
+      </>
+    )}
+  </div>
+) : (
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="flex gap-2">
               <FormField

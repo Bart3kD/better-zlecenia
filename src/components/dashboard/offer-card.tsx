@@ -21,13 +21,14 @@ import {
   MapPin,
 } from "lucide-react";
 import { renderIcon } from "@/utils/icon-mapping";
-import { Offer } from "@/services/offers-service";
+import { OFFER_TYPE } from "@/types/offers.types";
+import { OfferWithRelations } from "@/services/offers-service"; // Import the correct type
 import { formatDistanceToNow } from "date-fns";
 import StartConversation from '@/components/conversations/start-conversation';
 import { supabase } from '@/utils/supabase/client';
 
 interface OfferCardProps {
-  offer: Offer;
+  offer: OfferWithRelations; // Use the correct type with relations
   onViewDetails?: (offerId: string) => void;
   onContact?: (offerId: string) => void;
   onSave?: (offerId: string) => void;
@@ -40,7 +41,7 @@ export default function OfferCard({
   onSave,
 }: OfferCardProps) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const isHelpWanted = offer.type === "help_wanted";
+  const isHelpWanted = offer.type === OFFER_TYPE.HELP_WANTED; // Use enum
   
   // Get current user
   useEffect(() => {
@@ -84,6 +85,22 @@ export default function OfferCard({
       .slice(0, 2);
   };
 
+  // Format deadline text
+  const getDeadlineText = (deadline: string | null) => {
+    if (!deadline) return null;
+    
+    const deadlineDate = new Date(deadline);
+    const now = new Date();
+    
+    if (deadlineDate < now) {
+      return `Overdue by ${formatDistanceToNow(deadlineDate)}`;
+    } else {
+      return `Due in ${formatDistanceToNow(deadlineDate)}`;
+    }
+  };
+
+  const deadlineText = getDeadlineText(offer.deadline);
+
   return (
     <Card
       className={`transition-all duration-200 hover:shadow-lg ${styles.card}`}
@@ -102,7 +119,7 @@ export default function OfferCard({
               </Badge>
               {offer.category && (
                 <div className="flex items-center gap-1 text-sm text-gray-600">
-                  {renderIcon(offer.category.icon, "h-3 w-3")}
+                  {offer.category.icon && renderIcon(offer.category.icon, "h-3 w-3")}
                   <span className="truncate">{offer.category.name}</span>
                 </div>
               )}
@@ -143,7 +160,7 @@ export default function OfferCard({
 
         {/* Requirements */}
         {offer.requirements && (
-          <div className="mb">
+          <div className="mb-3">
             <p className="text-xs text-gray-500 mb-1">Requirements:</p>
             <p className="text-xs text-gray-700 line-clamp-2">
               {offer.requirements}
@@ -178,10 +195,12 @@ export default function OfferCard({
             <span>Posted {formatDistanceToNow(new Date(offer.created_at))} ago</span>
           </div>
           
-          {offer.deadline && (
+          {deadlineText && (
             <div className="flex items-center gap-1">
               <Calendar className="h-3 w-3" />
-              <span>Due {formatDistanceToNow(new Date(offer.deadline))}</span>
+              <span className={offer.deadline && new Date(offer.deadline) < new Date() ? 'text-red-600' : ''}>
+                {deadlineText}
+              </span>
             </div>
           )}
 

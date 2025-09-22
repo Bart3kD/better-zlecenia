@@ -1,4 +1,4 @@
-import { MESSAGE_TYPE, OFFER_RESPONSE_TYPE } from "@/types/messages.types";
+import { CANCELLATION_REQUEST_TYPE, MESSAGE_TYPE, OFFER_RESPONSE_TYPE } from "@/types/messages.types";
 import { z } from "zod";
 
 export const messageAttachmentSchema = z.object({
@@ -102,11 +102,37 @@ export const createSystemMessageSchema = baseMessageSchema.extend({
         .max(1000, 'System message cannot exceed 1000 characters')
 });
 
+export const createCancellationRequestSchema = baseMessageSchema.extend({
+    message_type: z
+        .literal(MESSAGE_TYPE.CANCELLATION_REQUEST),
+    
+    cancellation_request_type: z
+        .enum([
+            CANCELLATION_REQUEST_TYPE.REQUEST, 
+            CANCELLATION_REQUEST_TYPE.APPROVE, 
+            CANCELLATION_REQUEST_TYPE.DENY
+        ]),
+    
+    cancellation_reason: z
+        .string()
+        .min(10, 'Please provide a reason for cancellation (minimum 10 characters)')
+        .max(500, 'Cancellation reason cannot exceed 500 characters')
+        .optional()
+        .nullable(),
+    
+    content: z
+        .string()
+        .max(500, 'Additional message cannot be longer than 500 characters')
+        .optional()
+        .nullable()
+});
+
 export const createMessageSchema = z.discriminatedUnion('message_type', [
     createTextMessageSchema,
     createOfferResponseSchema,
     createCounterOfferSchema,
-    createSystemMessageSchema
+    createSystemMessageSchema,
+    createCancellationRequestSchema  // Add this line
 ]);
 
 export const updateMessageSchema = z.object({
@@ -171,6 +197,7 @@ export const getMessagesSchema = z.object({
         .optional()
 });
 
+
 export type CreateTextMessageData = z.infer<typeof createTextMessageSchema>;
 export type CreateOfferResponseData = z.infer<typeof createOfferResponseSchema>;
 export type CreateCounterOfferData = z.infer<typeof createCounterOfferSchema>;
@@ -179,3 +206,4 @@ export type CreateMessageData = z.infer<typeof createMessageSchema>;
 export type UpdateMessageData = z.infer<typeof updateMessageSchema>;
 export type MarkMessagesAsReadData = z.infer<typeof markMessagesAsReadSchema>;
 export type GetMessagesData = z.infer<typeof getMessagesSchema>;
+export type CreateCancellationRequestData = z.infer<typeof createCancellationRequestSchema>;

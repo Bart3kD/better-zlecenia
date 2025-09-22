@@ -106,6 +106,11 @@ export default function Navbar() {
       path: '/dashboard/messages',
       icon: MessageCircle,
       badge: totalUnreadCount > 0 ? totalUnreadCount : undefined
+    },
+        {
+      label: 'My offers',
+      path: '/dashboard/my-offers',
+      icon: MessageCircle,
     }
   ];
 

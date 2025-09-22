@@ -1,3 +1,5 @@
+// offers.types.ts - Updated with cancellation fields
+
 export enum OFFER_TYPE {
     HELP_WANTED = 'help_wanted',
     OFFERING_HELP = 'offering_help'
@@ -37,4 +39,9 @@ export interface Offer {
     created_at: string;
     updated_at: string;
     completed_at: string | null;
+    
+    // Cancellation fields
+    cancellation_requested_by: string | null;
+    cancellation_reason: string | null;
+    cancellation_requested_at: string | null;
 }

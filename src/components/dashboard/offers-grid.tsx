@@ -18,7 +18,7 @@ import {
   Clock,
   DollarSign
 } from 'lucide-react';
-import { Offer } from '@/services/offers-service';
+import { Offer } from '@/types/offers.types';
 import OfferCard from './offer-card';
 
 interface OffersGridProps {

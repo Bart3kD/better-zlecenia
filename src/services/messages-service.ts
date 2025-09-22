@@ -1,6 +1,8 @@
 import { supabase } from '@/utils/supabase/client';
-import { CreateMessageData, UpdateMessageData, GetMessagesData, MarkMessagesAsReadData } from '@/schemas/messages.schemas';
-import { Message } from '@/types/messages.types';
+import { CreateMessageData, UpdateMessageData, GetMessagesData, MarkMessagesAsReadData, CreateSystemMessageData, CreateCancellationRequestData } from '@/schemas/messages.schemas';
+import { CANCELLATION_REQUEST_TYPE, Message, MESSAGE_TYPE } from '@/types/messages.types';
+import { Offer } from '@/types/offers.types'; // Import from types, not services
+import { offersService, OfferWithRelations } from './offers-service';
 
 export interface MessageWithSender extends Message {
   sender?: {
@@ -242,5 +244,141 @@ export const messagesService = {
       .subscribe();
 
     return subscription;
+  },
+
+  // Add these functions to your messagesService
+
+// Create cancellation request message
+async createCancellationRequestMessage(messageData: CreateCancellationRequestData): Promise<MessageWithSender> {
+  const { data, error } = await supabase
+    .from('messages')
+    .insert(messageData)
+    .select(`
+      *,
+      sender:profiles!sender_id (
+        id,
+        username,
+        full_name,
+        avatar_url
+      )
+    `)
+    .single();
+
+  if (error) {
+    console.error('Error creating cancellation request message:', error);
+    throw error;
   }
+
+  // Update conversation's last_message_at
+  await supabase
+    .from('conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', messageData.conversation_id);
+
+  return data;
+},
+
+// Combined function to request cancellation (updates offer + sends message)
+async requestOfferCancellation(
+  conversationId: string,
+  offerId: string,
+  reason: string,
+  additionalMessage?: string
+): Promise<{ offer: OfferWithRelations; message: MessageWithSender }> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('User not authenticated');
+
+  // First, update the offer with cancellation request
+  const offer = await offersService.requestCancellation(offerId, reason);
+
+  // Then, create a cancellation request message
+  const messageData: CreateCancellationRequestData = {
+    conversation_id: conversationId,
+    sender_id: user.id,
+    message_type: MESSAGE_TYPE.CANCELLATION_REQUEST,
+    cancellation_request_type: CANCELLATION_REQUEST_TYPE.REQUEST,
+    cancellation_reason: reason,
+    content: additionalMessage || null,
+    attachments: null
+  };
+
+  const message = await this.createCancellationRequestMessage(messageData);
+
+  return { offer, message };
+},
+
+// Update your messagesService respondToOfferCancellation function
+async respondToOfferCancellation(
+  conversationId: string,
+  offerId: string,
+  approved: boolean,
+  responseMessage?: string
+): Promise<{ offer: OfferWithRelations; message: MessageWithSender }> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('User not authenticated');
+
+  // First, respond to the cancellation request in the offer
+  const offer = await offersService.respondToCancellationRequest(
+    offerId, 
+    approved, 
+    responseMessage
+  );
+
+  // If cancellation is approved, deactivate the conversation
+  if (approved) {
+    await supabase
+      .from('conversations')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', conversationId);
+  }
+
+  // Then, create a response message
+  const messageData: CreateCancellationRequestData = {
+    conversation_id: conversationId,
+    sender_id: user.id,
+    message_type: MESSAGE_TYPE.CANCELLATION_REQUEST,
+    cancellation_request_type: approved 
+      ? CANCELLATION_REQUEST_TYPE.APPROVE 
+      : CANCELLATION_REQUEST_TYPE.DENY,
+    cancellation_reason: null,
+    content: responseMessage || null,
+    attachments: null
+  };
+
+  const message = await this.createCancellationRequestMessage(messageData);
+
+  return { offer, message };
+},
+
+
+
+
+// Cancel/withdraw cancellation request
+async withdrawCancellationRequest(
+  conversationId: string,
+  offerId: string,
+  withdrawMessage?: string
+): Promise<{ offer: OfferWithRelations; message: MessageWithSender }> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('User not authenticated');
+
+  // First, cancel the cancellation request in the offer
+  const offer = await offersService.cancelCancellationRequest(offerId);
+
+  // Then, create a system message about the withdrawal
+  const messageData: CreateSystemMessageData = {
+    conversation_id: conversationId,
+    sender_id: user.id,
+    message_type: MESSAGE_TYPE.SYSTEM,
+    content: withdrawMessage || 'Cancellation request has been withdrawn.',
+    attachments: null
+  };
+
+  const message = await this.createMessage(messageData);
+
+  return { offer, message };
+}
 };
