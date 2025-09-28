@@ -25,20 +25,13 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { conversationsService } from '@/services/conversations-service';
-
-interface UserProfile {
-  id: string;
-  username?: string;
-  full_name?: string;
-  avatar_url?: string;
-  school_email: string;
-}
+import { Profile } from '@/types/profiles.types';
 
 export default function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
   const [loading, setLoading] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [currentUser, setCurrentUser] = useState<Profile | null>(null);
 
   // Get current user profile
   useEffect(() => {
@@ -107,7 +100,7 @@ export default function Navbar() {
       icon: MessageCircle,
       badge: totalUnreadCount > 0 ? totalUnreadCount : undefined
     },
-        {
+    {
       label: 'My offers',
       path: '/dashboard/my-offers',
       icon: MessageCircle,
@@ -159,10 +152,7 @@ export default function Navbar() {
 
       {/* Right Side Actions */}
       <div className="flex items-center gap-4">
-        {/* Search Button */}
-        <Button variant="ghost" size="sm" className="hidden sm:flex">
-          <Search className="h-4 w-4" />
-        </Button>
+        
 
         {/* Notifications */}
         <Button variant="ghost" size="sm" className="relative">
@@ -178,11 +168,14 @@ export default function Navbar() {
             <Button variant="ghost" className="p-1 rounded-full">
               <Avatar className="h-8 w-8 cursor-pointer">
                 <AvatarImage 
-                  src={currentUser?.avatar_url} 
+                  src={currentUser?.avatar_url ?? undefined} 
                   alt={currentUser?.full_name || currentUser?.username || 'User'} 
                 />
                 <AvatarFallback className="text-sm">
-                  {getInitials(currentUser?.full_name || currentUser?.username)}
+                  {getInitials(
+                    (currentUser?.full_name ?? undefined) ||
+                    (currentUser?.username ?? undefined)
+                  )}
                 </AvatarFallback>
               </Avatar>
             </Button>
@@ -201,7 +194,7 @@ export default function Navbar() {
               <User className="mr-2 h-4 w-4" />
               Profile
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
+            <DropdownMenuItem onClick={() => router.push('/settings')}>
               <Settings className="mr-2 h-4 w-4" />
               Settings
             </DropdownMenuItem>
